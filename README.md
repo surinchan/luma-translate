@@ -4,6 +4,14 @@
 
 一个使用 **Rust + Tauri 2** 实现的跨平台桌面划词翻译工具。鼠标选中文字后，选区旁会出现翻译按钮；点击后通过 OpenAI 兼容的 LLM API 翻译并显示结果。
 
+## 应用截图
+
+<p align="center">
+  <img src="docs/images/manual-translation.png" alt="Luma Translate 输入文本翻译窗口" width="720">
+</p>
+
+<p align="center"><sub>输入文本翻译窗口，可直接选择目标语言并提交翻译。</sub></p>
+
 ## 功能
 
 - Windows、macOS、Linux 全局划词检测
