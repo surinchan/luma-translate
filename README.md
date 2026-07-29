@@ -1,5 +1,7 @@
 # Luma Translate
 
+[![CI](https://github.com/surinchan/luma-translate/actions/workflows/ci.yml/badge.svg)](https://github.com/surinchan/luma-translate/actions/workflows/ci.yml)
+
 一个使用 **Rust + Tauri 2** 实现的跨平台桌面划词翻译工具。鼠标选中文字后，选区旁会出现翻译按钮；点击后通过 OpenAI 兼容的 LLM API 翻译并显示结果。
 
 ## 功能
@@ -35,6 +37,19 @@ npm run build
 ```
 
 安装包会生成在 `src-tauri/target/release/bundle/`。
+
+## 自动发布
+
+推送到 `main` 或创建 Pull Request 时，GitHub Actions 会在 Windows、Linux 和 macOS 上执行语法检查、格式检查与 Rust 测试。
+
+发布新版本前，先确保 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号一致，然后推送与版本号相同的标签：
+
+```bash
+git tag v0.6.4
+git push origin v0.6.4
+```
+
+GitHub Actions 会自动创建 GitHub Release，并附上 Windows、Linux、macOS Intel 和 macOS Apple Silicon 的安装包。当前 Windows 安装包未进行商业证书签名，macOS 使用临时签名且未公证，因此首次运行时系统可能显示安全提示。
 
 ## 系统权限
 
