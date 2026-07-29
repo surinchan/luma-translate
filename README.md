@@ -7,10 +7,10 @@
 ## 应用截图
 
 <p align="center">
-  <img src="docs/images/manual-translation.png" alt="Luma Translate 输入文本翻译窗口" width="720">
+  <img src="docs/images/settings.png" alt="Luma Translate 设置窗口" width="560">
 </p>
 
-<p align="center"><sub>输入文本翻译窗口，可直接选择目标语言并提交翻译。</sub></p>
+<p align="center"><sub>配置 OpenAI 兼容 API、模型、翻译语言和开机启动。</sub></p>
 
 ## 功能
 
