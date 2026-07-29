@@ -1,0 +1,16 @@
+{
+  "name": "luma-translate-ui",
+  "version": "0.6.4",
+  "description": "Cross-platform selection translator powered by an OpenAI-compatible LLM API",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "start": "tauri dev",
+    "dev": "tauri dev",
+    "check": "cargo check --manifest-path src-tauri/Cargo.toml",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.7.1"
+  }
+}

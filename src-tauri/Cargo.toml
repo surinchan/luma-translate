@@ -1,0 +1,46 @@
+[package]
+name = "luma-translate"
+version = "0.6.4"
+description = "Cross-platform selection translator powered by LLM APIs"
+authors = []
+edition = "2021"
+
+[lib]
+name = "luma_translate_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "luma-translate"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-opener = "2"
+tauri-plugin-autostart = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+rdev = "0.5"
+arboard = "3"
+dirs = "6"
+tokio = { version = "1", features = ["time"] }
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+png = "0.17"
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_DataExchange",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_Graphics_Gdi",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging"
+] }
