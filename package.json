@@ -4,6 +4,23 @@
   "description": "Cross-platform selection translator powered by an OpenAI-compatible LLM API",
   "private": true,
   "license": "MIT",
+  "homepage": "https://github.com/surinchan/luma-translate#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/surinchan/luma-translate.git"
+  },
+  "bugs": {
+    "url": "https://github.com/surinchan/luma-translate/issues"
+  },
+  "keywords": [
+    "translation",
+    "selection-translator",
+    "desktop-translator",
+    "tauri",
+    "rust",
+    "llm",
+    "openai-compatible"
+  ],
   "scripts": {
     "start": "tauri dev",
     "dev": "tauri dev",

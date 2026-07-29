@@ -4,6 +4,11 @@ version = "0.6.4"
 description = "Cross-platform selection translator powered by LLM APIs"
 authors = []
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/surinchan/luma-translate"
+homepage = "https://github.com/surinchan/luma-translate"
+keywords = ["translation", "translator", "tauri", "llm", "desktop"]
+categories = ["gui"]
 
 [lib]
 name = "luma_translate_lib"
