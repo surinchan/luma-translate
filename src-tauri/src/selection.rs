@@ -620,16 +620,143 @@ fn press_copy_shortcut_windows_reliable() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
+struct OleClipboardSnapshot {
+    data: Option<windows::Win32::System::Com::IDataObject>,
+}
+
+#[cfg(target_os = "windows")]
+impl OleClipboardSnapshot {
+    fn capture() -> Result<Self, String> {
+        use windows::Win32::System::Ole::{OleGetClipboard, OleInitialize, OleUninitialize};
+
+        unsafe { OleInitialize(None) }.map_err(|error| error.to_string())?;
+        match unsafe { OleGetClipboard() } {
+            Ok(data) => Ok(Self { data: Some(data) }),
+            Err(error) => {
+                unsafe { OleUninitialize() };
+                Err(error.to_string())
+            }
+        }
+    }
+
+    fn restore(mut self) -> Result<(), String> {
+        use windows::Win32::System::Ole::{OleFlushClipboard, OleSetClipboard};
+
+        let data = self
+            .data
+            .as_ref()
+            .ok_or_else(|| "clipboard snapshot is empty".to_owned())?;
+        unsafe { OleSetClipboard(data) }.map_err(|error| error.to_string())?;
+        unsafe { OleFlushClipboard() }.map_err(|error| error.to_string())?;
+        // Release the COM object while its OLE apartment is still initialized.
+        self.data.take();
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for OleClipboardSnapshot {
+    fn drop(&mut self) {
+        use windows::Win32::System::Ole::OleUninitialize;
+
+        self.data.take();
+        unsafe { OleUninitialize() };
+    }
+}
+
+#[cfg(target_os = "windows")]
+enum ClipboardFallback {
+    Text(String),
+    Empty,
+    Unavailable,
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsClipboardSnapshot {
+    ole: Option<OleClipboardSnapshot>,
+    fallback: ClipboardFallback,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowsClipboardSnapshot {
+    fn capture(clipboard: &mut Clipboard) -> Self {
+        use windows::Win32::System::DataExchange::CountClipboardFormats;
+
+        let fallback = match clipboard.get_text() {
+            Ok(text) => ClipboardFallback::Text(text),
+            Err(_) if unsafe { CountClipboardFormats() } == 0 => ClipboardFallback::Empty,
+            Err(_) => ClipboardFallback::Unavailable,
+        };
+        let ole = match OleClipboardSnapshot::capture() {
+            Ok(snapshot) => Some(snapshot),
+            Err(error) => {
+                diagnostic(&format!(
+                    "clipboard snapshot=ole status=unavailable reason={error}"
+                ));
+                None
+            }
+        };
+        Self { ole, fallback }
+    }
+
+    fn original_text(&self) -> &str {
+        match &self.fallback {
+            ClipboardFallback::Text(text) => text,
+            ClipboardFallback::Empty | ClipboardFallback::Unavailable => "",
+        }
+    }
+
+    fn restore(mut self, clipboard: &mut Clipboard) -> Result<&'static str, String> {
+        let mut ole_error = None;
+        if let Some(snapshot) = self.ole.take() {
+            match snapshot.restore() {
+                Ok(()) => return Ok("ole"),
+                Err(error) => ole_error = Some(error),
+            }
+        }
+
+        let fallback_result = match self.fallback {
+            ClipboardFallback::Text(text) => clipboard.set_text(text),
+            ClipboardFallback::Empty => clipboard.clear(),
+            ClipboardFallback::Unavailable => {
+                return Err(ole_error.unwrap_or_else(|| {
+                    "original clipboard format could not be captured".to_owned()
+                }))
+            }
+        };
+        fallback_result.map_err(|error| {
+            let fallback_error = error.to_string();
+            match ole_error {
+                Some(ole_error) => format!("OLE: {ole_error}; fallback: {fallback_error}"),
+                None => fallback_error,
+            }
+        })?;
+        Ok("fallback")
+    }
+}
+
+fn should_restore_clipboard(
+    synthetic_copy: bool,
+    capture_changed_clipboard: bool,
+    captured_version: u32,
+    current_version: u32,
+) -> bool {
+    synthetic_copy && capture_changed_clipboard && captured_version == current_version
+}
+
+#[cfg(target_os = "windows")]
 fn read_selected_text_windows_reliable() -> Result<String, String> {
     use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
     let mut clipboard = Clipboard::new().map_err(|error| error.to_string())?;
-    let original_text = clipboard.get_text().unwrap_or_default();
+    let original_clipboard = WindowsClipboardSnapshot::capture(&mut clipboard);
+    let original_text = original_clipboard.original_text().to_owned();
     let original_sequence = unsafe { GetClipboardSequenceNumber() };
 
     let mut current_sequence = original_sequence;
     let mut sequence_changed = false;
     let mut capture_source = "synthetic_ctrl_c";
+    let mut synthetic_copy = false;
 
     // Give a user's own Ctrl+C priority. In particular, never release real
     // modifier keys while the user is pressing them: doing so can turn their
@@ -658,6 +785,7 @@ fn read_selected_text_windows_reliable() -> Result<String, String> {
             ));
             return Ok(String::new());
         }
+        synthetic_copy = true;
     }
 
     for _ in 0..50 {
@@ -708,11 +836,39 @@ fn read_selected_text_windows_reliable() -> Result<String, String> {
         current_text.chars().count()
     ));
 
-    if (sequence_changed || content_changed) && !current_text.is_empty() {
-        Ok(current_text)
-    } else {
-        Ok(String::new())
+    // Only undo our own synthetic Ctrl+C. A real user Ctrl+C remains normal
+    // system behavior. The sequence guard also prevents us from overwriting
+    // anything the user copied after selection capture completed.
+    let clipboard_version = unsafe { GetClipboardSequenceNumber() };
+    if should_restore_clipboard(
+        synthetic_copy,
+        sequence_changed,
+        current_sequence,
+        clipboard_version,
+    ) {
+        match original_clipboard.restore(&mut clipboard) {
+            Ok(method) => diagnostic(&format!(
+                "clipboard restore=completed method={method} captured_version={current_sequence}"
+            )),
+            Err(error) => diagnostic(&format!(
+                "clipboard restore=failed captured_version={current_sequence} reason={error}"
+            )),
+        }
+    } else if synthetic_copy {
+        let reason = if sequence_changed {
+            "newer_clipboard_content"
+        } else {
+            "capture_did_not_change_clipboard"
+        };
+        diagnostic(&format!(
+            "clipboard restore=skipped reason={reason} captured_version={current_sequence} current_version={clipboard_version}"
+        ));
     }
+
+    if !(sequence_changed || content_changed) || current_text.is_empty() {
+        return Ok(String::new());
+    }
+    Ok(current_text)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -728,17 +884,24 @@ fn read_selected_text(
     clipboard
         .set_text(&marker)
         .map_err(|error| error.to_string())?;
-    press_copy_shortcut()?;
+    if let Err(error) = press_copy_shortcut() {
+        let _ = clipboard.set_text(previous);
+        return Err(error);
+    }
     thread::sleep(Duration::from_millis(100));
-    let selected = clipboard.get_text().unwrap_or_default();
-    if selected == marker {
+    let captured_clipboard_text = clipboard.get_text().unwrap_or_default();
+    if captured_clipboard_text == marker {
         // 没有可复制的选区时撤销内部 marker，避免污染剪贴板。
         let _ = clipboard.set_text(previous);
         return Ok(String::new());
     }
-    // 成功读取后保留选中文字。若此时用户主动按下 Ctrl+C，结果与系统
-    // 复制行为一致，也不会再被旧剪贴板内容反向覆盖。
-    Ok(selected.trim().to_owned())
+    let selected = captured_clipboard_text.trim().to_owned();
+    // 非 Windows 平台同样仅在剪贴板仍是本次捕获结果时恢复，避免覆盖
+    // 用户紧接着主动复制的更新内容。
+    if clipboard.get_text().ok().as_deref() == Some(captured_clipboard_text.as_str()) {
+        let _ = clipboard.set_text(previous);
+    }
+    Ok(selected)
 }
 
 fn point_in_own_window(app: &tauri::AppHandle, x: i32, y: i32) -> bool {
@@ -1184,7 +1347,7 @@ pub fn start_selection_watcher(app: tauri::AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_meaningful_drag;
+    use super::{is_meaningful_drag, should_restore_clipboard};
 
     #[test]
     fn plain_click_and_pointer_jitter_are_not_selections() {
@@ -1196,5 +1359,13 @@ mod tests {
     fn mouse_drag_is_a_selection_candidate() {
         assert!(is_meaningful_drag(100, 100, 104, 100));
         assert!(is_meaningful_drag(100, 100, 90, 125));
+    }
+
+    #[test]
+    fn restores_only_unchanged_synthetic_clipboard_content() {
+        assert!(should_restore_clipboard(true, true, 42, 42));
+        assert!(!should_restore_clipboard(false, true, 42, 42));
+        assert!(!should_restore_clipboard(true, false, 42, 42));
+        assert!(!should_restore_clipboard(true, true, 42, 43));
     }
 }
