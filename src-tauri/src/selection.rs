@@ -667,6 +667,11 @@ impl Drop for OleClipboardSnapshot {
 #[cfg(target_os = "windows")]
 enum ClipboardFallback {
     Text(String),
+    Image {
+        width: usize,
+        height: usize,
+        bytes: Vec<u8>,
+    },
     Empty,
     Unavailable,
 }
@@ -684,8 +689,15 @@ impl WindowsClipboardSnapshot {
 
         let fallback = match clipboard.get_text() {
             Ok(text) => ClipboardFallback::Text(text),
-            Err(_) if unsafe { CountClipboardFormats() } == 0 => ClipboardFallback::Empty,
-            Err(_) => ClipboardFallback::Unavailable,
+            Err(_) => match clipboard.get_image() {
+                Ok(image) => ClipboardFallback::Image {
+                    width: image.width,
+                    height: image.height,
+                    bytes: image.bytes.into_owned(),
+                },
+                Err(_) if unsafe { CountClipboardFormats() } == 0 => ClipboardFallback::Empty,
+                Err(_) => ClipboardFallback::Unavailable,
+            },
         };
         let ole = match OleClipboardSnapshot::capture() {
             Ok(snapshot) => Some(snapshot),
@@ -702,7 +714,9 @@ impl WindowsClipboardSnapshot {
     fn original_text(&self) -> &str {
         match &self.fallback {
             ClipboardFallback::Text(text) => text,
-            ClipboardFallback::Empty | ClipboardFallback::Unavailable => "",
+            ClipboardFallback::Image { .. }
+            | ClipboardFallback::Empty
+            | ClipboardFallback::Unavailable => "",
         }
     }
 
@@ -715,9 +729,21 @@ impl WindowsClipboardSnapshot {
             }
         }
 
-        let fallback_result = match self.fallback {
-            ClipboardFallback::Text(text) => clipboard.set_text(text),
-            ClipboardFallback::Empty => clipboard.clear(),
+        let (fallback_result, method) = match self.fallback {
+            ClipboardFallback::Text(text) => (clipboard.set_text(text), "text_fallback"),
+            ClipboardFallback::Image {
+                width,
+                height,
+                bytes,
+            } => (
+                clipboard.set_image(arboard::ImageData {
+                    width,
+                    height,
+                    bytes: std::borrow::Cow::Owned(bytes),
+                }),
+                "image_fallback",
+            ),
+            ClipboardFallback::Empty => (clipboard.clear(), "empty_fallback"),
             ClipboardFallback::Unavailable => {
                 return Err(ole_error.unwrap_or_else(|| {
                     "original clipboard format could not be captured".to_owned()
@@ -726,22 +752,53 @@ impl WindowsClipboardSnapshot {
         };
         fallback_result.map_err(|error| {
             let fallback_error = error.to_string();
-            match ole_error {
+            match &ole_error {
                 Some(ole_error) => format!("OLE: {ole_error}; fallback: {fallback_error}"),
                 None => fallback_error,
             }
         })?;
-        Ok("fallback")
+        if let Some(error) = ole_error {
+            diagnostic(&format!(
+                "clipboard restore=ole_failed fallback={method} reason={error}"
+            ));
+        }
+        Ok(method)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn clipboard_contains_non_text_content() -> bool {
+    use windows::Win32::System::DataExchange::{CountClipboardFormats, IsClipboardFormatAvailable};
+
+    const CF_TEXT: u32 = 1;
+    const CF_BITMAP: u32 = 2;
+    const CF_DIB: u32 = 8;
+    const CF_UNICODETEXT: u32 = 13;
+    const CF_DIBV5: u32 = 17;
+
+    let format_count = unsafe { CountClipboardFormats() };
+    if format_count <= 0 {
+        return false;
+    }
+    let has_text = unsafe { IsClipboardFormatAvailable(CF_TEXT) }.is_ok()
+        || unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) }.is_ok();
+    let has_image = unsafe { IsClipboardFormatAvailable(CF_BITMAP) }.is_ok()
+        || unsafe { IsClipboardFormatAvailable(CF_DIB) }.is_ok()
+        || unsafe { IsClipboardFormatAvailable(CF_DIBV5) }.is_ok();
+    has_image || !has_text
 }
 
 fn should_restore_clipboard(
     synthetic_copy: bool,
     capture_changed_clipboard: bool,
+    captured_non_text_content: bool,
     captured_version: u32,
     current_version: u32,
 ) -> bool {
-    synthetic_copy && capture_changed_clipboard && captured_version == current_version
+    synthetic_copy
+        && capture_changed_clipboard
+        && !captured_non_text_content
+        && captured_version == current_version
 }
 
 #[cfg(target_os = "windows")]
@@ -840,9 +897,12 @@ fn read_selected_text_windows_reliable() -> Result<String, String> {
     // system behavior. The sequence guard also prevents us from overwriting
     // anything the user copied after selection capture completed.
     let clipboard_version = unsafe { GetClipboardSequenceNumber() };
+    let captured_non_text_content =
+        current_text.is_empty() && clipboard_contains_non_text_content();
     if should_restore_clipboard(
         synthetic_copy,
         sequence_changed,
+        captured_non_text_content,
         current_sequence,
         clipboard_version,
     ) {
@@ -855,7 +915,9 @@ fn read_selected_text_windows_reliable() -> Result<String, String> {
             )),
         }
     } else if synthetic_copy {
-        let reason = if sequence_changed {
+        let reason = if captured_non_text_content {
+            "non_text_content"
+        } else if sequence_changed {
             "newer_clipboard_content"
         } else {
             "capture_did_not_change_clipboard"
@@ -1363,9 +1425,10 @@ mod tests {
 
     #[test]
     fn restores_only_unchanged_synthetic_clipboard_content() {
-        assert!(should_restore_clipboard(true, true, 42, 42));
-        assert!(!should_restore_clipboard(false, true, 42, 42));
-        assert!(!should_restore_clipboard(true, false, 42, 42));
-        assert!(!should_restore_clipboard(true, true, 42, 43));
+        assert!(should_restore_clipboard(true, true, false, 42, 42));
+        assert!(!should_restore_clipboard(false, true, false, 42, 42));
+        assert!(!should_restore_clipboard(true, false, false, 42, 42));
+        assert!(!should_restore_clipboard(true, true, true, 42, 42));
+        assert!(!should_restore_clipboard(true, true, false, 42, 43));
     }
 }
