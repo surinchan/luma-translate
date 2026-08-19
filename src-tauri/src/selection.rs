@@ -620,52 +620,12 @@ fn press_copy_shortcut_windows_reliable() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-struct OleClipboardSnapshot {
-    data: Option<windows::Win32::System::Com::IDataObject>,
-}
-
-#[cfg(target_os = "windows")]
-impl OleClipboardSnapshot {
-    fn capture() -> Result<Self, String> {
-        use windows::Win32::System::Ole::{OleGetClipboard, OleInitialize, OleUninitialize};
-
-        unsafe { OleInitialize(None) }.map_err(|error| error.to_string())?;
-        match unsafe { OleGetClipboard() } {
-            Ok(data) => Ok(Self { data: Some(data) }),
-            Err(error) => {
-                unsafe { OleUninitialize() };
-                Err(error.to_string())
-            }
-        }
-    }
-
-    fn restore(mut self) -> Result<(), String> {
-        use windows::Win32::System::Ole::{OleFlushClipboard, OleSetClipboard};
-
-        let data = self
-            .data
-            .as_ref()
-            .ok_or_else(|| "clipboard snapshot is empty".to_owned())?;
-        unsafe { OleSetClipboard(data) }.map_err(|error| error.to_string())?;
-        unsafe { OleFlushClipboard() }.map_err(|error| error.to_string())?;
-        // Release the COM object while its OLE apartment is still initialized.
-        self.data.take();
-        Ok(())
-    }
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for OleClipboardSnapshot {
-    fn drop(&mut self) {
-        use windows::Win32::System::Ole::OleUninitialize;
-
-        self.data.take();
-        unsafe { OleUninitialize() };
-    }
-}
-
-#[cfg(target_os = "windows")]
 enum ClipboardFallback {
+    Files(Vec<PathBuf>),
+    Html {
+        html: String,
+        alt_text: Option<String>,
+    },
     Text(String),
     Image {
         width: usize,
@@ -678,8 +638,8 @@ enum ClipboardFallback {
 
 #[cfg(target_os = "windows")]
 struct WindowsClipboardSnapshot {
-    ole: Option<OleClipboardSnapshot>,
     fallback: ClipboardFallback,
+    original_text: String,
 }
 
 #[cfg(target_os = "windows")]
@@ -687,49 +647,49 @@ impl WindowsClipboardSnapshot {
     fn capture(clipboard: &mut Clipboard) -> Self {
         use windows::Win32::System::DataExchange::CountClipboardFormats;
 
-        let fallback = match clipboard.get_text() {
-            Ok(text) => ClipboardFallback::Text(text),
-            Err(_) => match clipboard.get_image() {
-                Ok(image) => ClipboardFallback::Image {
-                    width: image.width,
-                    height: image.height,
-                    bytes: image.bytes.into_owned(),
-                },
-                Err(_) if unsafe { CountClipboardFormats() } == 0 => ClipboardFallback::Empty,
-                Err(_) => ClipboardFallback::Unavailable,
-            },
-        };
-        let ole = match OleClipboardSnapshot::capture() {
-            Ok(snapshot) => Some(snapshot),
-            Err(error) => {
-                diagnostic(&format!(
-                    "clipboard snapshot=ole status=unavailable reason={error}"
-                ));
-                None
+        let original_text = clipboard.get_text().ok();
+        let fallback = if let Ok(files) = clipboard.get().file_list() {
+            if files.is_empty() {
+                ClipboardFallback::Unavailable
+            } else {
+                ClipboardFallback::Files(files)
             }
+        } else if let Ok(image) = clipboard.get_image() {
+            ClipboardFallback::Image {
+                width: image.width,
+                height: image.height,
+                bytes: image.bytes.into_owned(),
+            }
+        } else if let Ok(html) = clipboard.get().html() {
+            ClipboardFallback::Html {
+                html,
+                alt_text: original_text.clone(),
+            }
+        } else if let Some(text) = original_text.clone() {
+            ClipboardFallback::Text(text)
+        } else if unsafe { CountClipboardFormats() } == 0 {
+            ClipboardFallback::Empty
+        } else {
+            ClipboardFallback::Unavailable
         };
-        Self { ole, fallback }
+        Self {
+            fallback,
+            original_text: original_text.unwrap_or_default(),
+        }
     }
 
     fn original_text(&self) -> &str {
-        match &self.fallback {
-            ClipboardFallback::Text(text) => text,
-            ClipboardFallback::Image { .. }
-            | ClipboardFallback::Empty
-            | ClipboardFallback::Unavailable => "",
-        }
+        &self.original_text
     }
 
-    fn restore(mut self, clipboard: &mut Clipboard) -> Result<&'static str, String> {
-        let mut ole_error = None;
-        if let Some(snapshot) = self.ole.take() {
-            match snapshot.restore() {
-                Ok(()) => return Ok("ole"),
-                Err(error) => ole_error = Some(error),
-            }
-        }
-
+    fn restore(self, clipboard: &mut Clipboard) -> Result<&'static str, String> {
         let (fallback_result, method) = match self.fallback {
+            ClipboardFallback::Files(files) => {
+                (clipboard.set().file_list(&files), "files_fallback")
+            }
+            ClipboardFallback::Html { html, alt_text } => {
+                (clipboard.set_html(html, alt_text), "html_fallback")
+            }
             ClipboardFallback::Text(text) => (clipboard.set_text(text), "text_fallback"),
             ClipboardFallback::Image {
                 width,
@@ -745,23 +705,10 @@ impl WindowsClipboardSnapshot {
             ),
             ClipboardFallback::Empty => (clipboard.clear(), "empty_fallback"),
             ClipboardFallback::Unavailable => {
-                return Err(ole_error.unwrap_or_else(|| {
-                    "original clipboard format could not be captured".to_owned()
-                }))
+                return Err("original clipboard format could not be captured".to_owned())
             }
         };
-        fallback_result.map_err(|error| {
-            let fallback_error = error.to_string();
-            match &ole_error {
-                Some(ole_error) => format!("OLE: {ole_error}; fallback: {fallback_error}"),
-                None => fallback_error,
-            }
-        })?;
-        if let Some(error) = ole_error {
-            diagnostic(&format!(
-                "clipboard restore=ole_failed fallback={method} reason={error}"
-            ));
-        }
+        fallback_result.map_err(|error| error.to_string())?;
         Ok(method)
     }
 }
