@@ -47,6 +47,9 @@ button { cursor: default; }
   overflow: hidden;
   padding: 0;
   background: transparent;
+  font: 400 14px/1.5 Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
 }
 
 .card {
@@ -130,8 +133,7 @@ button { cursor: default; }
   border-bottom: 1px solid var(--line);
   color: var(--muted);
   background: var(--soft);
-  font-size: 12px;
-  line-height: 1.55;
+  font: 400 12px/1.55 Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   white-space: pre-wrap;
 }
 
@@ -144,8 +146,7 @@ button { cursor: default; }
 
 .result {
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.65;
+  font: 400 14px/1.65 Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   white-space: pre-wrap;
 }
 

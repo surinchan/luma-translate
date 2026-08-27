@@ -42,8 +42,18 @@ document.querySelector("#copy").addEventListener("click", async () => {
 document.querySelector("#settings").addEventListener("click", () => invoke("open_settings"));
 document.querySelector("#close").addEventListener("click", () => invoke("close_panel"));
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") invoke("close_panel");
+  if (event.key === "Escape") {
+    invoke("close_panel");
+    return;
+  }
+  if ((event.ctrlKey || event.metaKey) && ["+", "-", "=", "0"].includes(event.key)) {
+    event.preventDefault();
+  }
 });
+
+document.addEventListener("wheel", (event) => {
+  if (event.ctrlKey || event.metaKey) event.preventDefault();
+}, { passive: false });
 
 window.addEventListener("DOMContentLoaded", () => {
   translatedText = "";

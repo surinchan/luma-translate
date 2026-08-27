@@ -10,7 +10,8 @@ use std::sync::Mutex;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Listener, Manager, PhysicalPosition, Position, State, WindowEvent,
+    AppHandle, Emitter, Listener, LogicalSize, Manager, PhysicalPosition, Position, Size, State,
+    WindowEvent,
 };
 use tauri_plugin_autostart::ManagerExt;
 use translator::{translate, translate_to};
@@ -22,6 +23,9 @@ struct AppState {
     // TrayIcon 会在 Drop 时从系统托盘移除，必须与应用保持相同生命周期。
     tray: Mutex<Option<TrayIcon>>,
 }
+
+const PANEL_WIDTH: f64 = 400.0;
+const PANEL_HEIGHT: f64 = 280.0;
 
 fn clamp_window(app: &AppHandle, x: i32, y: i32, width: i32, height: i32) -> (i32, i32) {
     let point = PhysicalPosition::new(x, y);
@@ -37,6 +41,42 @@ fn clamp_window(app: &AppHandle, x: i32, y: i32, width: i32, height: i32) -> (i3
         );
     }
     (x, y)
+}
+
+fn prepare_translation_panel(
+    app: &AppHandle,
+    panel: &tauri::WebviewWindow,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    panel.set_zoom(1.0).map_err(|error| error.to_string())?;
+
+    let logical_size = Size::Logical(LogicalSize::new(PANEL_WIDTH, PANEL_HEIGHT));
+    panel
+        .set_size(logical_size)
+        .map_err(|error| error.to_string())?;
+
+    // Move the hidden panel to the target monitor first, then apply the logical
+    // size again so mixed-DPI monitors cannot retain the previous scale/size.
+    let (rough_x, rough_y) = clamp_window(app, x, y, PANEL_WIDTH as i32, PANEL_HEIGHT as i32);
+    panel
+        .set_position(Position::Physical(PhysicalPosition::new(rough_x, rough_y)))
+        .map_err(|error| error.to_string())?;
+    panel
+        .set_size(logical_size)
+        .map_err(|error| error.to_string())?;
+
+    let physical_size = panel.outer_size().map_err(|error| error.to_string())?;
+    let (panel_x, panel_y) = clamp_window(
+        app,
+        x,
+        y,
+        physical_size.width as i32,
+        physical_size.height as i32,
+    );
+    panel
+        .set_position(Position::Physical(PhysicalPosition::new(panel_x, panel_y)))
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -199,10 +239,7 @@ async fn translate_selected_inner(app: AppHandle) -> Result<String, String> {
         .lock()
         .map_err(|_| "无法读取鼠标位置")?;
     let panel = app.get_webview_window("panel").ok_or("翻译窗口不存在")?;
-    let (px, py) = clamp_window(&app, x + 12, y + 12, 400, 280);
-    panel
-        .set_position(Position::Physical(PhysicalPosition::new(px, py)))
-        .map_err(|e| e.to_string())?;
+    prepare_translation_panel(&app, &panel, x + 12, y + 12)?;
     panel
         .emit("selection-changed", &text)
         .map_err(|e| e.to_string())?;
