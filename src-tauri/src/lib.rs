@@ -24,8 +24,8 @@ struct AppState {
     tray: Mutex<Option<TrayIcon>>,
 }
 
-const PANEL_WIDTH: f64 = 400.0;
-const PANEL_HEIGHT: f64 = 280.0;
+const PANEL_WIDTH: f64 = 440.0;
+const PANEL_HEIGHT: f64 = 320.0;
 
 fn clamp_window(app: &AppHandle, x: i32, y: i32, width: i32, height: i32) -> (i32, i32) {
     let point = PhysicalPosition::new(x, y);
