@@ -131,10 +131,25 @@ pub(crate) fn hide_button(window: &tauri::WebviewWindow) {
 
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn position_and_show_button(
+    app: &AppHandle,
     window: &tauri::WebviewWindow,
     x: i32,
     y: i32,
 ) -> Result<(i32, i32, bool), String> {
+    const BUTTON_SIZE: f64 = 42.0;
+
+    window.set_zoom(1.0).map_err(|error| error.to_string())?;
+    window
+        .set_size(Size::Logical(LogicalSize::new(BUTTON_SIZE, BUTTON_SIZE)))
+        .map_err(|error| error.to_string())?;
+    let physical_size = window.outer_size().map_err(|error| error.to_string())?;
+    let (x, y) = clamp_window(
+        app,
+        x,
+        y,
+        physical_size.width as i32,
+        physical_size.height as i32,
+    );
     window
         .set_position(Position::Physical(PhysicalPosition::new(x, y)))
         .map_err(|error| error.to_string())?;

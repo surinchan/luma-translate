@@ -31,8 +31,8 @@ use windows::{
     },
 };
 
-const WIDTH: i32 = 42;
-const HEIGHT: i32 = 42;
+pub(crate) const WIDTH: i32 = 42;
+pub(crate) const HEIGHT: i32 = 42;
 const HIT_RADIUS: i32 = 20;
 static HWND_HANDLE: AtomicIsize = AtomicIsize::new(0);
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();

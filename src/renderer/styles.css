@@ -23,6 +23,8 @@ button { cursor: default; }
   place-items: center;
   overflow: hidden;
   background: transparent;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
 }
 
 .translate-orb {
@@ -30,6 +32,11 @@ button { cursor: default; }
   place-items: center;
   width: 36px;
   height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  max-width: 36px;
+  max-height: 36px;
+  flex: 0 0 36px;
   padding: 0;
   border: 1px solid rgba(0, 0, 0, .08);
   border-radius: 8px;
@@ -40,7 +47,15 @@ button { cursor: default; }
 }
 
 .translate-orb:hover { background: var(--accent); }
-.translate-orb svg { width: 20px; height: 20px; }
+.translate-orb svg {
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+  min-height: 20px;
+  max-width: 20px;
+  max-height: 20px;
+  flex: none;
+}
 
 /* Translation panel */
 .panel-page {

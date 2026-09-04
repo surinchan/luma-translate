@@ -1022,7 +1022,13 @@ fn handle_mouse_up(
     {
         // Windows uses the native HWND exclusively. Do not gate it on the
         // optional WebView button being created or painted.
-        let (px, py) = clamp_window(&app, x + 12, y + 12, 42, 42);
+        let (px, py) = clamp_window(
+            &app,
+            x + 12,
+            y + 12,
+            native_button::WIDTH,
+            native_button::HEIGHT,
+        );
         if let Some(button) = app.get_webview_window("button") {
             let _ = button.emit("selection-changed", &text);
             let _ = button.hide();
@@ -1040,20 +1046,12 @@ fn handle_mouse_up(
             diagnostic("button status=missing_window");
             return;
         };
-        let button_size = button
-            .outer_size()
-            .unwrap_or(tauri::PhysicalSize::new(42, 42));
-        let (px, py) = clamp_window(
-            &app,
-            x + 12,
-            y + 12,
-            button_size.width as i32,
-            button_size.height as i32,
-        );
         let _ = button.emit("selection-changed", &text);
-        match position_and_show_button(&button, px, py) {
+        match position_and_show_button(&app, &button, x + 12, y + 12) {
             Ok((actual_x, actual_y, visible)) => diagnostic(&format!(
-                "button status=shown requested={px},{py} actual={actual_x},{actual_y} visible={visible}"
+                "button status=shown requested={},{} actual={actual_x},{actual_y} visible={visible}",
+                x + 12,
+                y + 12,
             )),
             Err(error) => diagnostic(&format!("button status=show_failed error={error}")),
         }
